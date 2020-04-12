@@ -8,11 +8,14 @@ import termios
 import logging
 import shlex
 
+import err_screen
+
 from event import KeyEvent, KeyEventQueue
 from key_reader import KeyReader, _ATTR_NEW
 from program_manager import ProgramManager, ProgramItem
 import keys
 from draw_tools import *
+from constants import *
 
 _LOG_PATH = 'log.log'
 _USR_BIN = '/usr/bin/'
@@ -30,6 +33,13 @@ logging.basicConfig(filename=_LOG_PATH, filemode='w',
         format='%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s')
 
 logging.info('[LOG] setup logger')
+
+
+def exit(exit_code=0, cls=True):
+    if cls:
+        clear()
+    termios.tcsetattr(_STDIN_FD, termios.TCSANOW, _TCATTR_OLD)
+    sys.exit(exit_code)
 
 
 class UIDrawTask:
@@ -55,14 +65,93 @@ class _UIWait:
         self.__wait = False
 
 
+class InfoBox:
+    _BGCOLOR = 42
+    _TEXTCOLOR = 37
+    _BTNBGCOLOR = 40
+    _BTNTEXTCOLOR = 37
+    _BTN = '[ OK ]'
+
+    def __init__(self, msg :str, title :str, reader :KeyReader):
+        self.__msg = msg.split('\n')[:ln()]
+        self.__reader = reader
+        self.__title = title[:col()]
+
+        self.__contx_height = len(self.__msg)
+        self.__box_height = self.__contx_height + 3
+
+    def __make_body_lines(self) -> str:
+        tleft = int(col() / 2 - len(self.__title) / 2)
+        tright = col() - tleft - len(self.__title)
+        title = bgstr('=' * tleft + self.__title + '=' * tright, 
+                        self._BGCOLOR, self._TEXTCOLOR)
+        
+        blist = []  # body str list
+        for m in self.__msg:
+            mleft = int(col() / 2 - len(m) / 2) 
+            mright = col() - tleft - len(m) + 2
+            mstr = bgstr(' ' * mleft + m + ' ' * mright, 
+                            self._BGCOLOR, self._TEXTCOLOR)
+            blist.append(mstr)
+
+        btm = bgstr(' '*col(), self._BGCOLOR, self._TEXTCOLOR)
+
+        return [title] + blist + [btm]
+
+    def __fill_box(self):
+        start_y = int(ln() / 2 - self.__contx_height / 2)
+
+        for i in range(self.__contx_height):
+            tprint(0, start_y + i, bgstr(' ' * col(), self._BGCOLOR))
+
+    def __draw(self):
+        self.__fill_box()
+        
+        start_y = int(ln() / 2 - self.__contx_height / 2)
+        btn_y = start_y + self.__box_height - 2
+        btn_start_x = int(col()/ 2 - len(self._BTN) / 2) + 1  
+
+        strlist = self.__make_body_lines()
+        
+        for i, m in enumerate(strlist):
+            tprint(0, start_y + i, m)
+
+        puts(btn_start_x, btn_y, self._BTN)
+        puts(btn_start_x + len(self._BTN) - 1, btn_y, '')
+
+    def activate(self):
+        self.__draw()
+        while True:
+            k = self.__reader.get_key()
+
+            if k.key == keys.KEY_ENTER:
+                return
+
+            self.__draw()
+
 class Memu:
     _PADDING = 1
+    _BGCOLOR = 47
+    _TEXTCOLOR = 30
+    _HLBGCOLOR = 45
+    _HLTEXTCOLOR = 37
+
     def __init__(self, x, y, items :list, reader :KeyReader):
         self.__items = items
         self.__icur = 0
         self.__x = x
         self.__y = y
         self.__max_width = max((len(x) for x in items))
+        self.__close = False
+        self.__reader = reader
+        self.__selected = None
+
+        if self.__max_width > col() - self.__x:
+            self.__max_width = col()
+
+    @property
+    def selected(self):
+        return self.__selected
 
     @property
     def x(self):
@@ -72,19 +161,92 @@ class Memu:
     def y(self):
         return self.__y
 
+    @property
+    def __max_item_num(self) -> int:
+        return ln() - self.__y - self._PADDING
+
+    def __cut_string(self, text :str) -> str:
+        if len(text) + self.__x > col():
+            return text[:col() - self.__x]
+        return text
+
     def __get_vis_items(self) -> list:
-        return self.__items[self.y:ln() - self._PADDING]
+        start = 0
+        
+        if self.__icur > self.__max_item_num:
+            start = self.__icur - self.__max_item_num
+
+        return self.__items[start:self.__max_item_num + start]
 
     def __draw_items(self):
         vit = self.__get_vis_items()
-        
+        for i, item in enumerate(vit):
+            tprint(self.__x + self._PADDING, self.__y + i, bgstr(self.__cut_string(item), 
+                    self._BGCOLOR, self._TEXTCOLOR))
 
-    def __draw_memu(self):
+    def __draw_bg(self):
+        total_width = self._PADDING * 2 + self.__max_width
+        for yi in range(len(self.__items)):
+            tprint(self.__x, self.__y + yi, bgstr(' '*total_width,
+                    self._BGCOLOR))
+
+    def __hide(self) -> int:
+        return ln() - _PADDING
+
+    def __rel_index(self) -> int:
+        return self.__icur if self.__icur < len(self.__items) else len(self.__items)
+
+    def __draw_cursor(self):
+        t = self.__items[self.__icur]
         total_width = self._PADDING * 2 + self.__max_width
 
-    def draw(self) -> str:
-        pass
+        ty = self.__y + self.__rel_index()
 
+        cbg = bgstr(' '*total_width, self._HLBGCOLOR, self._HLTEXTCOLOR)
+        ct = bgstr(' ' * self._PADDING + str(t) + ' '*(total_width - self._PADDING - len(str(t))),
+                    self._HLBGCOLOR, self._HLTEXTCOLOR)
+
+        tprint(self.__x, ty, cbg)
+        tprint(self.__x, ty, ct)
+
+    def __draw(self) -> str:
+        self.__draw_bg()
+        self.__draw_items()
+        self.__draw_cursor()
+
+    def __do_key(self, key):
+        method = {
+            keys.KEY_UP:    self.__up,
+            keys.KEY_DOWN:  self.__down,
+            keys.KEY_ESC:   self.close_box,
+            keys.KEY_ENTER: self.__select,
+        }.get(key.key, lambda : logging.info('[MENU BOX] UNKNOWN KEY' + repr(key)))()
+
+    def activate(self):
+        self.__draw()
+        while not self.__close:
+            k = self.__reader.get_key()
+            self.__do_key(k)
+            self.__draw()
+        logging.info('[MENU BOX] Close')
+        return self.__selected
+
+    def __up(self):
+        if self.__icur - 1 < 0:
+            return
+        self.__icur -= 1
+
+    def __down(self):
+        if self.__icur + 1 >= len(self.__items):
+            return
+        self.__icur += 1
+
+    def __select(self):
+        self.__selected = self.__items[self.__icur]
+        self.close_box()
+
+    def close_box(self):
+        self.__close = True
 
 class UI:
     _TITLE_H = 1
@@ -100,6 +262,10 @@ class UI:
         self.__reader = reader
 
         self.__uiwait = _UIWait()
+        self.__since_index = -1
+        self.__last_since_index = -2
+
+        self.__activates = []
 
     @property
     def __col(self) -> int:
@@ -128,9 +294,11 @@ class UI:
 
     def __get_vis_items(self) -> list:
         start = 0
+        self.__since_index = start
         
         if self.__icur > self.__item_list_height:
             start = self.__icur - self.__item_list_height
+            self.__since_index = start
 
         end = start + self.__item_list_height
 
@@ -141,8 +309,9 @@ class UI:
 
     def __draw_items_list(self, vis_items :list):
         for i, v in enumerate(vis_items):
-            puts(0, self._BODY_START_Y + i, self.__cut_string(str(v)))
-            print()
+            ov = self.__cut_string(str(v))
+            puts(0, self._BODY_START_Y + i, ov)
+            print(' ' * (self.__col - len(ov)))
 
         if len(vis_items) < self.__item_list_height:
             print('\n'*(self.__item_list_height - len(vis_items) - 1))
@@ -155,7 +324,7 @@ class UI:
         
         return self._BODY_START_Y + self.__icur - start
 
-    def __draw_curser(self):
+    def __draw_cursor(self):
         v = self.__items[self.__icur]
         
         tprint(0, self.__get_item_y(), bgstr(' '*self.__col, 46))
@@ -187,28 +356,49 @@ class UI:
         with self.__uiwait:
             return tinput(0, start + 1, bgstr(prompt, 41))
 
+    def __draw_info_box(self, msg :str, title :str):
+        b = InfoBox(msg, title, self.__reader)
+        b.activate()
+
     def __draw(self):
-        clear()
+        hide_cursor()
+
+        puts(0, 0, '')
 
         if not self.__is_valid_resolution():
             print('Terminal to small.')
             return
 
         self.__draw_title()
-        self.__draw_items_list(self.__get_vis_items())
-        self.__draw_curser()
+        
+        vitems = self.__get_vis_items()
+        self.__draw_items_list(vitems)
+        
+        self.__draw_cursor()
         self.__draw_target()
 
-        puts(0, 0, "")
+        puts(0, 0, '')
+        
+        show_cursor()
+
+    def __do_menu_action(self, action :str):
+        method = {
+            'exit':     self.exit,
+            'about':    lambda : self.__draw_info_box(CONST_ABOUT, 'ABOUT'),
+        }.get(action, lambda :None)()
 
     def __do_key(self, key_event :KeyEvent):
         method = {
+                
                 keys.KEY_UP:        self.up,
                 keys.KEY_DOWN:      self.down,
                 keys.KEY_ENTER:     self.select,
                 keys.KEY_EOF:       self.exit,
                 keys.KEY_ALT_SPACE: self.__select_with_arg,
                 keys.KEY_COLON:     self.__exec_cmd,
+                keys.KEY_S:         self.search,
+                keys.KEY_ESC:       self.menu,
+
                 }.get(key_event.key, 
                         lambda : None)()
 
@@ -222,6 +412,9 @@ class UI:
 
             time.sleep(1 / _RESOLUTION_CHECK_FREQ)
 
+    def get_target(self):
+        return self.__items[self.__icur]
+
     def up(self):
         if self.__icur - 1 >= 0:
             self.__icur -= 1
@@ -231,6 +424,25 @@ class UI:
         if self.__icur + 1 < len(self.__items):
             self.__icur += 1
         self.__draw()
+
+    def menu(self):
+        m = Memu(1, 2, ['exit', 'about'], self.__reader)
+
+        a = m.activate()
+
+        if a is None:
+            return
+
+        self.__do_menu_action(a)
+
+    def search(self):
+        p = self.__draw_input_box('Search pattern(RE support): ')
+        if not p:
+            return
+
+        i = self.__mgr.search(p)
+        
+        self.__icur = i if i != -1 else self.__icur
 
     def select(self, ask_arg=False):
         t = self.__items[self.__icur]
@@ -272,13 +484,9 @@ class UI:
         self.select(True)
 
     def exit(self):
-        clear()
-        sys.exit(0)
+        exit(0)
 
-    def get_target(self):
-        return self.__items[self.__icur]
-
-    def main_loop(self):
+    def __main_loop0(self):
         ch_thread = threading.Thread(target=self.__check_resolution)
         ch_thread.setDaemon(True)
         ch_thread.start()
@@ -293,13 +501,20 @@ class UI:
                         self.__do_key(key)
                         self.__draw()
                     else:
-                        self.__draw_msg('Unknown input')
+                        self.__draw_msg('Unknown input: ' + repr(key.key))
         except KeyboardInterrupt as e:
             clear()
             print(str(e))
-            sys.exit(0)
+            exit(1, False)
 
         # time.sleep(1 / _REFRESH_RATE)
+
+    def main_loop(self):
+        try:
+            self.__main_loop0()
+        except Exception:
+            with self.__uiwait:
+                err_screen.handle_exception(*sys.exc_info())
 
     def test(self, cur=0):
         self.__icur = cur

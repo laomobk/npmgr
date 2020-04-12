@@ -1,5 +1,5 @@
 import os
-
+import re
 
 class ProgramItem:
     def __init__(self, name, path):
@@ -45,3 +45,11 @@ class ProgramManager:
         os.system(' '.join((p,) + args))
 
         input('\n[Press Enter to exit]')
+
+    def search(self, pattern :str) -> int:
+        ro = re.compile(pattern)
+
+        for i, v in enumerate(self.__programs):
+            if ro.match(v.name):
+                return i
+        return -1

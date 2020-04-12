@@ -38,6 +38,10 @@ class KeyReader:
         buf = os.read(_STDIN_FD, _READ_BUFFER)
         kname = self.__keymap.get(buf, 'UNKNOWN_KEY')
 
+        if kname == 'UNKNOWN_KEY' and buf in keys.K_MAP.keys():
+            buf = keys.K_MAP.get(buf, buf)
+            kname = self.__keymap.get(buf, 'UNKNOWN_KEY')
+
         termios.tcsetattr(_STDIN_FD, termios.TCSANOW, attr_o)
 
         return KeyEvent(buf, kname)

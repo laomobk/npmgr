@@ -57,3 +57,11 @@ def col() -> int:
 
 def ln() -> int:
     return os.get_terminal_size()[1]
+
+
+def show_cursor():
+    tprint(0, 0, '\033[?25h')
+
+
+def hide_cursor():
+    tprint(0, 0, '\033[?25l')
