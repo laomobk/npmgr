@@ -129,6 +129,54 @@ class InfoBox:
 
             self.__draw()
 
+
+class HugeTextBox:
+    def __init__(self, text :str, title, reader :KeyReader):
+        self.__reader = reader
+        self.__text = text.split('\n')
+        self.__title = title[:col()]
+        self.__close = False
+    
+    def __draw(self):
+        clear()
+
+        tx = int(col() / 2 - len(self.__title) / 2)
+
+        puts(0, 0, bgstr(' '*col()))
+        puts(tx, 0, bgstr(self.__title))
+
+        for y, t in enumerate(self.__text):
+            puts(0, y+1, '')
+            print(t)
+
+    def __check_resolution(self):
+        oc, ol = os.get_terminal_size()
+        while not self.__close:
+            nc, nl = os.get_terminal_size()
+            if nc != oc or nl != ol:
+                oc, ol = nc, nl
+                self.__draw()
+            time.sleep(0.1)
+
+    def __close_box(self):
+        self.__close = True
+
+    def activate(self):
+        t = threading.Thread(target=self.__check_resolution)
+        t.setDaemon(True)
+        t.start()
+
+        self.__draw()
+        while True:
+            k = self.__reader.get_key()
+
+            if k.key == keys.KEY_q:
+                self.__close_box()
+                return
+
+            self.__draw()
+
+
 class Memu:
     _PADDING = 1
     _BGCOLOR = 47
@@ -248,12 +296,22 @@ class Memu:
     def close_box(self):
         self.__close = True
 
+
 class UI:
     _TITLE_H = 1
     _INFO_BAR_H = 1
     _BODY_START_Y = 2
     _CONTEXT_BACK = 2
     _TITLE = 'Program Mamager'
+
+    _MENU = [
+             'man',
+             'command',
+             'search',
+             'exec with args',
+             'help',
+             'exit',
+            ]
     
     def __init__(self, mgr :ProgramManager, reader :KeyReader):
         self.__mgr = mgr
@@ -383,8 +441,14 @@ class UI:
 
     def __do_menu_action(self, action :str):
         method = {
-            'exit':     self.exit,
-            'about':    lambda : self.__draw_info_box(CONST_ABOUT, 'ABOUT'),
+            'exit':             self.exit,
+            'about':            (lambda : 
+                self.__draw_info_box(CONST_ABOUT, 'ABOUT')),
+            'man':              self.__man,
+            'command':          self.exec_cmd,
+            'search':           self.search,
+            'exec with args':   self.__select_with_arg,
+            'help':             self.__help,
         }.get(action, lambda :None)()
 
     def __do_key(self, key_event :KeyEvent):
@@ -395,9 +459,12 @@ class UI:
                 keys.KEY_ENTER:     self.select,
                 keys.KEY_EOF:       self.exit,
                 keys.KEY_ALT_SPACE: self.__select_with_arg,
-                keys.KEY_COLON:     self.__exec_cmd,
-                keys.KEY_S:         self.search,
+                keys.KEY_COLON:     self.exec_cmd,
+                keys.KEY_s:         self.search,
                 keys.KEY_ESC:       self.menu,
+                keys.KEY_PGUP:      self.__pgup,
+                keys.KEY_PGDOWN:    self.__pgdown,
+                keys.KEY_m:         self.__man,
 
                 }.get(key_event.key, 
                         lambda : None)()
@@ -425,8 +492,30 @@ class UI:
             self.__icur += 1
         self.__draw()
 
+    def __pgup(self):
+        if self.__icur - self.__item_list_height < 0:
+            self.__icur = 0
+        else:
+            self.__icur -= self.__item_list_height - 1
+
+    def __pgdown(self):
+        if self.__icur + self.__item_list_height > len(self.__items):
+            self.__icur = len(self.__items) - 1
+        else:
+            self.__icur += self.__item_list_height + 1
+
+    def __man(self):
+        t = self.__items[self.__icur]
+
+        os.system('man %s' % t)
+
+    def __help(self):
+        box = HugeTextBox(HELP, 'help', self.__reader)
+        with self.__uiwait:
+            box.activate()
+
     def menu(self):
-        m = Memu(1, 2, ['exit', 'about'], self.__reader)
+        m = Memu(1, 2, self._MENU, self.__reader)
 
         a = m.activate()
 
@@ -452,7 +541,7 @@ class UI:
 
         if ask_arg:
             a = self.__draw_input_box('Arguments (Separate with space) : ')
-            if a is None:
+            if not a:
                 return
             arg = shlex.split(a)
 
@@ -469,7 +558,7 @@ class UI:
             logging.info('[SEL] Exception raised : ' + str(e))
             raise KeyboardInterrupt(str(e))
 
-    def __exec_cmd(self):
+    def exec_cmd(self):
         cmd = self.__draw_input_box('Command : ')
 
         if not cmd:
