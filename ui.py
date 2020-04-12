@@ -81,20 +81,18 @@ class InfoBox:
         self.__box_height = self.__contx_height + 3
 
     def __make_body_lines(self) -> str:
-        tleft = int(col() / 2 - len(self.__title) / 2)
-        tright = col() - tleft - len(self.__title)
-        title = bgstr('=' * tleft + self.__title + '=' * tright, 
+        title = bgstr('=' * col(),
                         self._BGCOLOR, self._TEXTCOLOR)
         
         blist = []  # body str list
         for m in self.__msg:
             mleft = int(col() / 2 - len(m) / 2) 
-            mright = col() - tleft - len(m) + 2
+            mright = col() - mleft - len(m) + 2
             mstr = bgstr(' ' * mleft + m + ' ' * mright, 
                             self._BGCOLOR, self._TEXTCOLOR)
             blist.append(mstr)
 
-        btm = bgstr(' '*col(), self._BGCOLOR, self._TEXTCOLOR)
+        btm = bgstr('='*col(), self._BGCOLOR, self._TEXTCOLOR)
 
         return [title] + blist + [btm]
 
@@ -110,11 +108,14 @@ class InfoBox:
         start_y = int(ln() / 2 - self.__contx_height / 2)
         btn_y = start_y + self.__box_height - 2
         btn_start_x = int(col()/ 2 - len(self._BTN) / 2) + 1  
+        title_start_x = int(col() / 2 - len(self.__title) / 2)
 
         strlist = self.__make_body_lines()
         
         for i, m in enumerate(strlist):
             tprint(0, start_y + i, m)
+
+        puts(title_start_x, start_y, bgstr(self.__title, self._BGCOLOR, self._TEXTCOLOR))
 
         puts(btn_start_x, btn_y, self._BTN)
         puts(btn_start_x + len(self._BTN) - 1, btn_y, '')
@@ -170,7 +171,7 @@ class HugeTextBox:
         while True:
             k = self.__reader.get_key()
 
-            if k.key == keys.KEY_q:
+            if k.key in (keys.KEY_q, keys.KEY_ESC):
                 self.__close_box()
                 return
 
@@ -276,6 +277,7 @@ class Memu:
             k = self.__reader.get_key()
             self.__do_key(k)
             self.__draw()
+
         logging.info('[MENU BOX] Close')
         return self.__selected
 
@@ -290,6 +292,8 @@ class Memu:
         self.__icur += 1
 
     def __select(self):
+        if self.__items[self.__icur] == '---':
+            return  # ignore
         self.__selected = self.__items[self.__icur]
         self.close_box()
 
@@ -310,6 +314,8 @@ class UI:
              'search',
              'exec with args',
              'help',
+             '---',
+             'about',
              'exit',
             ]
     
@@ -361,6 +367,13 @@ class UI:
         end = start + self.__item_list_height
 
         return self.__items[start:end + 1]
+
+    def activates(self, box):
+        if not hasattr(box, 'activate'):
+            return
+
+        with self.__uiwait:
+            box.activate()
 
     def __cut_string(self, text :str) -> str:
         return text[:self.__col - 1]
@@ -416,7 +429,7 @@ class UI:
 
     def __draw_info_box(self, msg :str, title :str):
         b = InfoBox(msg, title, self.__reader)
-        b.activate()
+        self.activates(b)
 
     def __draw(self):
         hide_cursor()

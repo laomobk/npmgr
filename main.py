@@ -15,7 +15,7 @@ def main():
         from event import KeyEventQueue
         from key_reader import KeyReader
         
-        mgr = ProgramManager(_TERMUX_BIN
+        mgr = ProgramManager(#_TERMUX_BIN
                             )
         queue = KeyEventQueue()
         reader = KeyReader(queue)

@@ -4,6 +4,10 @@ import traceback
 
 _BGCOLOR = 44
 _TEXTCOLOR = 37
+_TITLEBGCOLOR = 47
+_TITLETEXTCOLOR = 30
+
+_ERR_TITLE = 'OOPS!'
 
 _ERR_TEXT = \
 '''
@@ -15,8 +19,12 @@ _ERR_TEXT = \
 
 def handle_exception(exc_type, exc_value, exc_tb):
     # Fill screen
-    for y in range(draw.ln() + 1):
-        draw.puts(0, y, draw.bgstr(' '*draw.col(), _BGCOLOR, _TEXTCOLOR))
+    draw.puts(0, 0, draw.bgstr(' '*draw.col(), _TITLEBGCOLOR, _TITLETEXTCOLOR))
+    draw.puts(int(draw.col() / 2 - len(_ERR_TITLE) / 2), 0, 
+                draw.bgstr(_ERR_TITLE, _TITLEBGCOLOR, _TITLETEXTCOLOR))
+
+    for y in range(draw.ln() - 1):
+        draw.puts(0, y+2, draw.bgstr(' '*draw.col(), _BGCOLOR, _TEXTCOLOR))
     
     draw.puts(0, 0, '')
     
