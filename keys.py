@@ -15,6 +15,7 @@ KEY_COLON = b':'
 KEY_m = b'm'
 KEY_s = b's'
 KEY_q = b'q'
+KEY_j = b'j'
 
 UNKNOWN_KEY = -1
 

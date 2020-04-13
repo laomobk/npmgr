@@ -1,0 +1,3 @@
+
+class NotAnUIException(Exception):
+    pass

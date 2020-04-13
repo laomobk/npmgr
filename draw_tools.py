@@ -3,9 +3,37 @@ import sys
 import logging
 import readline
 import os
+from typing import List
 
 _STDIN_FD = sys.stdin.fileno()
 _TCATTR_OLD = termios.tcgetattr(_STDIN_FD)[:]
+
+TCATTR_COMMON = _TCATTR_OLD[:]
+
+TCATTR_NOECHO = TCATTR_COMMON[:]
+TCATTR_NOECHO[3] &= ~termios.ECHO
+
+TCATTR_IMMEDIATE = TCATTR_NOECHO[:]
+TCATTR_IMMEDIATE[3] &= ~termios.ICANON
+
+
+class TcAttrContext:
+    def __init__(self, tcattr :List[int]):
+        self.__tcattr = tcattr
+        self.__backup = None
+
+    def __setattr(self, tcattr):
+        o = termios.tcgetattr(_STDIN_FD)[:]
+        termios.tcsetattr(_STDIN_FD, termios.TCSANOW, tcattr)
+
+        return o
+
+    def __enter__(self, *args):
+        self.__backup = self.__setattr(self.__tcattr)
+
+    def __exit__(self, *args):
+        self.__setattr(self.__backup)
+
 
 def puts(x, y, text :str):
     print('\033[%s;%sH%s' % (y, x, text), end='')
