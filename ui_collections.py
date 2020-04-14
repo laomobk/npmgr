@@ -191,6 +191,7 @@ class InputBox(UI):
     _TITLE_COLOR = (47, 30)
     _BODY_COLOR = (47, 30)
     _INPUT_AREA_COLOR = (40, 37)
+
     def __init__(self, title :str, prompt :str):
         self.__title = title
         self.__activated = False
