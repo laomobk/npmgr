@@ -6,7 +6,6 @@ _TERMUX_BIN = '/data/data/com.termux/files/usr/bin'
 _MIN_COL = 30
 _MIN_LN = 20
 
-
 def check_os():
     if os.name == 'posix':
         return
@@ -22,8 +21,9 @@ def check_resolution():
 
 
 def main():
+    from ui_manager import activate_ui, main_loop, npmgr_exit
+    import draw_tools as draw
     import err_screen
-    from box_manager import activate_ui, main_loop, npmgr_exit
     try:
         check_os()
 
@@ -36,7 +36,7 @@ def main():
         from event import KeyEventQueue
         from key_reader import KeyReader
         
-        mgr = ProgramManager(_TERMUX_BIN
+        mgr = ProgramManager( _TERMUX_BIN
                              )
 
         queue = KeyEventQueue()
@@ -52,7 +52,9 @@ def main():
         pass
     except Exception:
         err_screen.handle_exception(*sys.exc_info())
-
+    finally:
+        draw.termios.tcsetattr(draw._STDIN_FD, draw.termios.TCSANOW, draw.TCATTR_COMMON)
+        draw.show_cursor()
 
 if __name__ == '__main__':
     main()

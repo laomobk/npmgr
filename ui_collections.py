@@ -18,7 +18,7 @@ import keys
 from draw_tools import *
 from constants import *
 
-import box_manager
+import ui_manager
 
 from ui import UI
 
@@ -43,15 +43,6 @@ def exit(exit_code=0, cls=True):
         clear()
     termios.tcsetattr(_STDIN_FD, termios.TCSANOW, _TCATTR_OLD)
     sys.exit(exit_code)
-
-
-class UIDrawTask:
-    def __init__(self, target, *args):
-        self.__target = target
-        self.__args = args
-
-    def draw(self):
-        self.__target(*args)
 
 
 class _UIWait:
@@ -131,7 +122,7 @@ class InfoBox(UI):
 
     def do_key(self, k):
         if k.key == keys.KEY_ENTER:
-            box_manager.destroy_ui(self)
+            ui_manager.destroy_ui(self)
 
     def activate(self):
         self.__draw()
@@ -168,17 +159,8 @@ class HugeTextBox(UI):
 
         puts(0, ln(), bgstr(' '*col()))
 
-    def __check_resolution(self):
-        oc, ol = os.get_terminal_size()
-        while not self.__close:
-            nc, nl = os.get_terminal_size()
-            if (nc != oc or nl != ol) and box_manager.get_current_ui():
-                oc, ol = nc, nl
-                self.__draw()
-            time.sleep(0.1)
-
     def __close_box(self):
-        box_manager.destroy_ui(self)
+        ui_manager.destroy_ui(self)
 
     def do_key(self, k):
         if k.key in (keys.KEY_q, keys.KEY_ESC):
@@ -202,6 +184,147 @@ class HugeTextBox(UI):
     def draw(self):
         self.__draw()
 
+
+class InputBox(UI):
+    _PADDING = 3
+    _BORDER = 2
+    _TITLE_COLOR = (47, 30)
+    _BODY_COLOR = (47, 30)
+    _INPUT_AREA_COLOR = (40, 37)
+    def __init__(self, title :str, prompt :str):
+        self.__title = title
+        self.__activated = False
+        self.__input_start_y = 0
+        self.__prompt = prompt
+
+        self.__start_x = self._PADDING + 1
+
+        self.__buffer = []
+        self.__reader = KeyReader(None)
+
+        self.__cursor_offset = 0
+
+    @property
+    def __input_length(self):
+        return col() - self._PADDING * 2 - self._BORDER * 2
+
+    @property
+    def __cursor_start_x(self):
+        return self._PADDING + self._BORDER
+
+    @property
+    def __max_width(self):
+        return col() - self._PADDING * 2
+
+    def __com_buffer(self, comcmd :str, ch :str):
+        if comcmd == 'a' and len(self.__buffer) < self.__input_length - 1:  
+            # append
+            self.__buffer.insert(self.__cursor_offset, ch)
+            self.__update_cursor(1)
+
+        elif comcmd == 'd' and self.__buffer:  # delete
+            self.__buffer.pop(self.__cursor_offset - 1)
+            self.__update_cursor(-1)
+
+    def __do_key(self, k):
+        if k == keys.KEY_ENTER:
+                puts(0, 0, '')
+                self.__activated = False
+
+        elif k in (b'\x1b[D', b'\x1b[C'):
+                ofs = {b'\x1b[D' : -1, b'\x1b[C' : 1}[k]
+
+                self.__update_cursor(ofs)
+
+        elif len(k) == 1: # ascii input
+            ok = ord(k)
+
+            if k == b'\x7f':  # backspace
+                self.__com_buffer('d', '')
+                self.__rm_ch()
+                self.__update_cursor()
+
+            elif ok in range(33, 127) or k == b' ':
+                self.__com_buffer('a', chr(ord(k)))
+
+        else:
+            for ch in k:
+                self.__do_key(ch.to_bytes(1, 'big'))
+
+    def __refresh(self):
+        tprint(self.__cursor_start_x + 1, 
+                self.__input_start_y, 
+                bgstr(''.join(self.__buffer), *self._INPUT_AREA_COLOR))
+
+        tprint(self.__cursor_start_x + 1 + len(self.__buffer) + 1, 
+                self.__input_start_y, 
+                bgstr('_' * (self.__input_length - len(self.__buffer) - 1), 
+                    *self._INPUT_AREA_COLOR))
+
+    def __update_cursor(self, ofs=0):
+        if self.__cursor_offset + ofs in range(0, len(self.__buffer) + 1):
+            self.__cursor_offset += ofs
+
+        puts(self.__cursor_start_x + self.__cursor_offset + 1,
+             self.__input_start_y, '')
+
+    def __rm_ch(self):
+        tprint(self.__cursor_start_x + len(self.__buffer) + 1,
+               self.__input_start_y, ' ')
+
+    def __key_loop(self):
+        try:
+            while self.__activated:
+                    k = self.__reader.get_key()
+                    self.__do_key(k.key)
+                    self.__update_cursor()
+                    self.__refresh()
+        except KeyboardInterrupt:
+            self.__activated = False
+            self.__buffer = ['']
+
+    def get_input(self):
+        self.draw()
+        # v = tinput(self.__start_x + self._BORDER, self.__input_start_y, '')
+        
+        self.__update_cursor()
+        self.__key_loop()
+
+        self.__activated = False
+        ui_manager.destroy_ui(self)
+
+        return ''.join(self.__buffer)
+
+    def activate(self):
+        title = self.__title
+        start = int(ln() / 2) - 1
+        
+        tx = int(col() / 2 - len(title) / 2) - 1
+
+        tbc, txc = self._TITLE_COLOR
+        bc, tc = self._BODY_COLOR
+
+        t1 = bgstr('=' * self.__max_width, bc)
+        t2 = bgstr(' ' * self.__max_width, bc)
+        t3 = '{0}{1}{0}'.format(bgstr(' ' * self._BORDER, bc),
+                ' ' * (self.__max_width - self._BORDER * 2))
+        t4 = t1
+
+        for i, v in enumerate((t1, t2, t3, t4)):
+            tprint(self.__start_x, start + i, v)
+
+        tprint(self.__start_x + self._BORDER, 
+                start + 1, bgstr(self.__prompt, tbc))
+
+        tprint(tx, start, bgstr(' %s ' % title, tbc, txc))
+
+        self.__activated = True
+        self.__input_start_y = start + 2
+
+        self.__refresh()
+        self.__update_cursor()
+    
+    draw = activate
 
 class Menu(UI):
     _PADDING = 1
@@ -270,6 +393,9 @@ class Menu(UI):
         return self.__icur if self.__icur < len(self.__items) else len(self.__items)
 
     def __draw_cursor(self):
+        if self.__icur > len(self.__items) or self.__icur < 0:
+            return
+        
         t = self.__items[self.__icur]
         total_width = self._PADDING * 2 + self.__max_width
 
@@ -281,6 +407,9 @@ class Menu(UI):
 
         tprint(self.__x, ty, cbg)
         tprint(self.__x, ty, ct)
+
+    def __is_ignore(self, item :str) -> bool:
+        return item.count('-') == len(item)
 
     def __draw(self) -> str:
         self.__draw_bg()
@@ -300,26 +429,30 @@ class Menu(UI):
 
     def __up(self):
         if self.__icur - 1 < 0:
-            return
-        self.__icur -= 1
+            self.__icur = len(self.__items) - 1
+        else:
+            self.__icur -= 1
 
     def __down(self):
         if self.__icur + 1 >= len(self.__items):
-            return
-        self.__icur += 1
+            self.__icur = 0
+        else:
+            self.__icur += 1
 
     def __select(self):
-        if self.__items[self.__icur] == '---':
+        if self.__is_ignore(self.__items[self.__icur]):
             return  # ignore
         self.__selected = self.__items[self.__icur]
         
+        self.close_box()
+
         if self.__on_select_func:
             self.__on_select_func(self.__selected)
 
-        self.close_box()
-
     def close_box(self):
-        box_manager.destroy_ui(self)
+        if self.__on_select_func:
+            self.__on_select_func(None)
+        ui_manager.destroy_ui(self)
 
     def draw(self):
         self.__draw()
@@ -334,9 +467,10 @@ class ProgramManagerUI(UI):
     _BODY_START_Y = 2
     _CONTEXT_BACK = 2
     _TITLE = 'Program Mamager'
-    _MENU_BUTTON = '[MENU]'
+    _MENU_BUTTON = '[M]'
     _M_BTN_A = (47, 30)
     _M_BTN_B = (40, 37)
+    _BACKGROUND_COLOR = 40
 
     _MENU = [
              'man',
@@ -353,11 +487,15 @@ class ProgramManagerUI(UI):
     def __init__(self, mgr :ProgramManager):
         self.__mgr = mgr
         self.__items = mgr.load_programs()
+        
+        if not self.__items:
+            self.__items = ['']
+
         self.__icur = 0
 
         self.__uiwait = _UIWait()
         self.__since_index = -1
-        self.__last_since_index = -2
+        self.__last_since_index = -1
 
         self.__menu_activated = False
 
@@ -399,7 +537,7 @@ class ProgramManagerUI(UI):
         return self.__items[start:end + 1]
 
     def __activates(self, ui):
-        box_manager.activate_ui(ui)
+        ui_manager.activate_ui(ui)
 
     def __cut_string(self, text :str) -> str:
         return text[:self.__col - 1]
@@ -439,21 +577,10 @@ class ProgramManagerUI(UI):
         tprint(0, self.__buttom_y, bgstr(str(msg), 41, 37))
 
     def __draw_input_box(self, prompt :str, title='input'):
-        start = int(self.__ln / 2) - 1
-        
-        tx = int(self.__col / 2 - len(title) / 2) - 1
+        b = InputBox(title, prompt)
+        self.__activates(b)
 
-        t1 = bgstr('=' * self.__col, 41)
-        t2 = ' ' * self.__col
-        t3 = t1
-
-        for i, v in enumerate((t1, t2, t3)):
-            tprint(0, start + i, v)
-
-        tprint(tx, start, bgstr(' %s ' % title, 41))
-        
-        with self.__uiwait:
-            return tinput(0, start + 1, bgstr(prompt, 41))
+        return b.get_input()
 
     def __draw_info_box(self, msg :str, title :str):
         b = InfoBox(msg, title)
@@ -461,9 +588,15 @@ class ProgramManagerUI(UI):
 
     def __draw_menu_button(self):
         bg, tc = self._M_BTN_B if self.__menu_activated else self._M_BTN_A
-        puts(0, 0, bgstr(self._MENU_BUTTON, bg, tc))
+        puts(2, 0, bgstr(self._MENU_BUTTON, bg, tc))
+
+    def __draw_background(self):
+        for y in range(self.__ln + 1):
+            tprint(0, y, bgstr(' '*col(), self._BACKGROUND_COLOR))
 
     def __draw(self):
+        clear()
+
         hide_cursor()
 
         puts(0, 0, '')
@@ -513,17 +646,6 @@ class ProgramManagerUI(UI):
                 }.get(key_event.key, 
                         lambda : None)()
 
-    def __check_resolution(self):
-        oc, ol = self.__col, self.__ln
-
-        while True:
-            if box_manager.get_current_ui() is self and \
-                    (self.__col != oc or self.__ln != ol) and not self.__uiwait:
-                self.__draw()
-                oc, ol = self.__col, self.__ln
-
-            time.sleep(1 / _RESOLUTION_CHECK_FREQ)
-
     def get_target(self):
         return self.__items[self.__icur]
 
@@ -532,14 +654,14 @@ class ProgramManagerUI(UI):
             self.__icur -= 1
         else:
             self.__icur = len(self.__items) - 1
-        self.__draw()
+        # self.__draw()
 
     def down(self):
         if self.__icur + 1 < len(self.__items):
             self.__icur += 1
         else:
             self.__icur = 0
-        self.__draw()
+        # self.__draw()
 
     def __pgup(self):
         if self.__icur - self.__item_list_height < 0:
@@ -556,7 +678,7 @@ class ProgramManagerUI(UI):
     def __man(self):
         t = self.__items[self.__icur]
 
-        os.system('man %s' % t)
+        self.__mgr.exec_cmd('man %s' % t, False)
 
     def __help(self):
         box = HugeTextBox(HELP, 'help')
@@ -587,6 +709,7 @@ class ProgramManagerUI(UI):
     def menu(self):
         def on_select(a):
             self.__menu_activated = False
+            self.__draw_menu_button()
 
             if a is None:
                 return
@@ -614,6 +737,10 @@ class ProgramManagerUI(UI):
 
     def select(self, ask_arg=False):
         t = self.__items[self.__icur]
+        
+        if not t:
+            return
+        
         logging.info('[SEL] Selected = ' + str(t))
 
         arg = []
@@ -647,9 +774,8 @@ class ProgramManagerUI(UI):
             return
 
         clear()
-        os.system(cmd)
-
-        input('\n[Press enter to exit]')
+        
+        self.__mgr.exec_cmd(cmd)
 
     def __select_with_arg(self):
         self.select(True)
@@ -660,8 +786,6 @@ class ProgramManagerUI(UI):
     def __main_loop0(self):
         self.__draw()
         
-        logging.info('[PMUI] Current UI = %s' % box_manager.get_current_ui())
-
         try:
             while True:
                 if not self.__is_valid_resolution():
@@ -690,7 +814,7 @@ class ProgramManagerUI(UI):
         self.__draw()
 
     def main_loop(self):
-        box_manager.activate_ui(self, self)
+        ui_manager.activate_ui(self, self)
         # self.__init_loop()
 
     def __init_loop(self):

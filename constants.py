@@ -1,7 +1,10 @@
 CONST_ABOUT = \
 '''
-NPMGR
-Version 0.1
+Nz Program Manager
+Version 0.2 build
+
+Chenhongbo 2020
+Spec. 2020
 '''
 
 

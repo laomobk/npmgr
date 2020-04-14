@@ -1,5 +1,22 @@
 import os
 import re
+import ui_share
+
+
+class _CMDModeContext:
+    def __init__(self):
+        self.__omode = False
+
+    def __enter__(self, *_):
+        self.__omode = ui_share.CMD_MODE
+        ui_share.CMD_MODE = True
+
+    def __exit__(self, *_):
+        ui_share.CMD_MODE = self.__omode
+
+
+run_command = _CMDModeContext()
+
 
 class ProgramItem:
     def __init__(self, name, path):
@@ -26,6 +43,9 @@ class ProgramManager:
         self.__programs = []
 
     def __load_programs(self, path) -> list:
+        if not os.path.exists(self.__path):
+            return []
+
         d = os.listdir(self.__path)
         
         for item in d:
@@ -41,10 +61,11 @@ class ProgramManager:
 
     def exec(self, prog :ProgramItem, *args):
         p = prog.path
-        
-        os.system(' '.join((p,) + args))
+       
+        with run_command:
+            os.system(' '.join((p,) + args))
 
-        input('\n[Press Enter to exit]')
+            input('\n[Press Enter to exit]')
 
     def search(self, pattern :str) -> int:
         ro = re.compile(pattern)
@@ -53,3 +74,10 @@ class ProgramManager:
             if ro.match(v.name):
                 return i
         return -1
+
+    def exec_cmd(self, cmd, wait=True):
+        with run_command:
+            os.system(cmd)
+            
+            if wait:
+                input('\n[Press Enter to exit]')

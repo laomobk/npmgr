@@ -18,7 +18,7 @@ _ERR_TEXT = \
 '''
 
 def handle_exception(exc_type, exc_value, exc_tb, kidding=False):
-    # Fill screen
+    # Fill screen    
     for y in range(draw.ln() - 1):
         draw.puts(0, y+2, draw.bgstr(' '*draw.col(), _BGCOLOR, _TEXTCOLOR))
     
