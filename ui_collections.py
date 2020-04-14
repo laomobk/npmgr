@@ -229,13 +229,18 @@ class InputBox(UI):
 
     def __do_key(self, k):
         if k == keys.KEY_ENTER:
-                puts(0, 0, '')
-                self.__activated = False
+            puts(0, 0, '')
+            self.__activated = False
 
         elif k in (b'\x1b[D', b'\x1b[C'):
-                ofs = {b'\x1b[D' : -1, b'\x1b[C' : 1}[k]
+            ofs = {b'\x1b[D' : -1, b'\x1b[C' : 1}[k]
 
-                self.__update_cursor(ofs)
+            self.__update_cursor(ofs)
+
+        elif k in (b'\x1b[H', b'\x1b[F'):
+            ofs = {b'\x1b[H' : -self.__cursor_offset, b'\x1b[F' : len(self.__buffer) - self.__cursor_offset}[k]
+
+            self.__update_cursor(ofs)
 
         elif len(k) == 1: # ascii input
             ok = ord(k)
@@ -476,6 +481,7 @@ class ProgramManagerUI(UI):
     _MENU = [
              'man',
              'command',
+             'sudo',
              'search',
              'jump',
              'exec with args',
@@ -488,7 +494,7 @@ class ProgramManagerUI(UI):
     def __init__(self, mgr :ProgramManager):
         self.__mgr = mgr
         self.__items = mgr.load_programs()
-        
+
         if not self.__items:
             self.__items = ['']
 
@@ -499,7 +505,7 @@ class ProgramManagerUI(UI):
         self.__last_since_index = -1
 
         self.__menu_activated = False
-
+        
     @property
     def __col(self) -> int:
         return os.get_terminal_size()[0]
@@ -626,6 +632,7 @@ class ProgramManagerUI(UI):
             'jump':             self.jump, 
             'exec with args':   self.__select_with_arg,
             'help':             self.__help,
+            'sudo':             self.__sudo,
         }.get(action, lambda :None)()
 
     def do_key(self, key_event :KeyEvent):
@@ -754,11 +761,10 @@ class ProgramManagerUI(UI):
 
         try:
             self.__draw_msg('Press Enter twice to run.')
-
+            
             clear()
-
-            with self.__uiwait:
-                self.__mgr.exec(t, *arg)
+            
+            self.__mgr.exec(t, *arg)
 
             logging.info('[SEL] Finish')
         except Exception as e:
@@ -780,6 +786,19 @@ class ProgramManagerUI(UI):
 
     def __select_with_arg(self):
         self.select(True)
+
+    def __sudo(self):
+        ib = InputBox('sudo', 'command with sudo:')
+        self.__activates(ib)
+        
+        cmd = ib.get_input()
+
+        if not cmd:
+            return
+
+        clear()
+
+        self.__mgr.exec_cmd('sudo %s' % cmd)
 
     def exit(self):
         exit(0)
@@ -808,8 +827,20 @@ class ProgramManagerUI(UI):
 
         # time.sleep(1 / _REFRESH_RATE)
 
-    def activate(self):
-        self.__draw()
+    def activate(self): 
+        if self.__items == ['']:
+            ib = InputBox('Invalid BIN path', 'Valid bin path:')
+            self.__activates(ib)
+            
+            self.__items = self.__mgr.load_programs(ib.get_input())
+        
+            if not self.__items:
+                self.__items = ['']
+                self.__draw_info_box('Invalid path', 'Error')
+            else:
+                self.__draw()
+        else:
+            self.__draw()
 
     def draw(self):
         self.__draw()

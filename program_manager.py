@@ -1,17 +1,23 @@
 import os
 import re
+import logging
+
 import ui_share
+import draw_tools
 
 
 class _CMDModeContext:
     def __init__(self):
         self.__omode = False
+        self.__tcctx = draw_tools.TcAttrContext(draw_tools.TCATTR_COMMON)
 
     def __enter__(self, *_):
+        self.__tcctx.__enter__()
         self.__omode = ui_share.CMD_MODE
         ui_share.CMD_MODE = True
 
     def __exit__(self, *_):
+        self.__tcctx.__exit__()
         ui_share.CMD_MODE = self.__omode
 
 
@@ -43,10 +49,13 @@ class ProgramManager:
         self.__programs = []
 
     def __load_programs(self, path) -> list:
-        if not os.path.exists(self.__path):
+        logging.info('[PLOADER] Load path = %s' % path)
+
+        if not os.path.exists(path) or not os.path.isdir(path):
+            logging.info('Path \'%s\' is invalid' % path)
             return []
 
-        d = os.listdir(self.__path)
+        d = os.listdir(path)
         
         for item in d:
             itemp = os.path.join(path, item)
@@ -56,12 +65,13 @@ class ProgramManager:
 
         return self.__programs
 
-    def load_programs(self) -> list:
-        return self.__load_programs(self.__path)
+    def load_programs(self, path :str=None) -> list:
+        p = path if path else self.__path
+        return self.__load_programs(p)
 
     def exec(self, prog :ProgramItem, *args):
         p = prog.path
-       
+        
         with run_command:
             os.system(' '.join((p,) + args))
 
