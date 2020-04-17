@@ -1,4 +1,3 @@
-# 绘制程序列表
 
 import os
 import sys
@@ -21,6 +20,8 @@ from constants import *
 import ui_manager
 
 from ui import UI
+
+import stat
 
 _LOG_PATH = 'log.log'
 _USR_BIN = '/usr/bin/'
@@ -338,6 +339,7 @@ class Menu(UI):
     _TEXTCOLOR = 30
     _HLBGCOLOR = 45
     _HLTEXTCOLOR = 37
+    _MIN_WIDTH = 8
 
     def __init__(self, x, y, items :list):
         self.__items = items
@@ -351,6 +353,9 @@ class Menu(UI):
         if self.__max_width > col() - self.__x:
             self.__max_width = col()
 
+        if self.__max_width < self._MIN_WIDTH:
+            self.__max_width = self._MIN_WIDTH
+
     @property
     def selected(self):
         return self.__selected
@@ -359,9 +364,15 @@ class Menu(UI):
     def x(self):
         return self.__x
 
+    def set_x(self, x :int):
+        self.__x = x
+
     @property
     def y(self):
         return self.__y
+
+    def set_y(self, y :int):
+        self.__y = y
 
     @property
     def __max_item_num(self) -> int:
@@ -479,6 +490,7 @@ class ProgramManagerUI(UI):
     _BACKGROUND_COLOR = 40
 
     _MENU = [
+             'file mgr',
              'man',
              'command',
              'sudo',
@@ -633,6 +645,7 @@ class ProgramManagerUI(UI):
             'exec with args':   self.__select_with_arg,
             'help':             self.__help,
             'sudo':             self.__sudo,
+            'file mgr':         self.__file_mgr
         }.get(action, lambda :None)()
 
     def do_key(self, key_event :KeyEvent):
@@ -682,6 +695,10 @@ class ProgramManagerUI(UI):
             self.__icur = len(self.__items) - 1
         else:
             self.__icur += self.__item_list_height + 1
+
+    def __file_mgr(self):
+        mgr = FileManagerUI()
+        self.__activates(mgr)
 
     def __man(self):
         t = self.__items[self.__icur]
@@ -860,6 +877,449 @@ class ProgramManagerUI(UI):
         self.__icur = cur
         self.__draw()
 
+
+class HorizontalMenuBar(UI):
+    _COLOR = (47, 30)
+    _SELECTED_COLOR = (40, 37)
+    _INTERVAL = 3
+    _PADDING = 1
+    class __Item:
+        def __init__(self, item :str, menu :Menu, x :int):
+            self.item = item
+            self.menu = menu
+            self.x = x
+
+        def __str__(self):
+            return self.item
+
+        def __len__(self):
+            return len(self.item)
+
+    def __init__(self, y, items :list, menus :list):
+        self.__y = y
+        self.__km_map = {k:v for k, v in zip(items, menus)}
+        self.__items = tuple(self.__km_map.keys())
+        self.__menus = tuple(self.__km_map.keys())
+        self.__icur = 0
+        self.__focus :UI = self  # who will deal key event
+        self.__on_selected_listener = lambda s, i : None
+        self.__bar_on_focus = False
+
+    def set_focus(self, focus :bool):
+        self.__bar_on_focus = focus
+        self.draw()
+
+    def __get_vis_items(self):
+        vis = []
+        tcol = self._PADDING + 1
+
+        for item in self.__items:
+            tcol += len(item)
+
+            if tcol > col():
+                break
+            
+            vis.append(self.__Item(
+                item, self.__km_map[item], tcol - len(item)))
+            tcol += self._INTERVAL
+
+        return vis
+
+    def __draw_items(self, items):
+        puts(0, self.__y, bgstr(' '*col(), *self._COLOR))
+
+        ix = self._PADDING + 1
+
+        for item in items:
+            puts(ix, self.__y, bgstr(str(item), *self._COLOR))
+            ix += len(str(item)) + self._INTERVAL
+
+    def __draw_cursor(self, item):
+        x = item.x
+        n = item.item
+
+        tprint(x, self.__y, bgstr(n, *self._SELECTED_COLOR))
+
+    def __mov_icur(self, vis_items, ofs):
+        picur = self.__icur + ofs
+
+        if picur not in range(len(vis_items)):
+            return
+
+        self.__icur = picur
+
+    def set_on_selected_listener(self, listener):
+        '''
+        def listener(selected_menu_name, submenu_item_name)
+        '''
+        if not hasattr(listener, '__call__'):
+            return
+        self.__on_selected_listener = listener
+
+    def __on_submenu_selected_listener(self, item):
+        if not item:
+            return
+        
+        self.__focus = self
+        self.__on_selected_listener(self.__items[self.__icur], item)
+
+    def __select(self):
+        target = self.__get_vis_items()[self.__icur]
+        tm :Menu = target.menu
+
+        tm.set_x(target.x)
+        tm.set_y(self.__y + 1)
+        tm.set_on_select(self.__on_submenu_selected_listener)
+        tm.activate()
+        
+        self.__focus = tm
+
+    def __do_key(self, key):
+        if key in (keys.KEY_LEFT, keys.KEY_RIGHT):
+            ofs = {keys.KEY_LEFT : -1, keys.KEY_RIGHT : 1}[key]
+            self.__mov_icur(self.__get_vis_items(), ofs)
+
+            self.draw()
+
+        elif key == b'\n':
+            self.__select()
+
+    def do_key(self, key):
+        if self.__focus is self:
+            self.__do_key(key.key)
+        else:
+            if key.key == keys.KEY_ESC:
+                self.__focus = self
+            else:
+                self.__focus.do_key(key)  # pass key event
+
+    def draw(self):
+        vitems = self.__get_vis_items()
+        self.__draw_items(vitems)
+
+        if self.__bar_on_focus:
+            self.__draw_cursor(vitems[self.__icur])
+
+        if self.__focus is not self:
+            self.__focus.draw()
+
+
+class FileManagerUI(UI):
+    _TITLE_COLOR = (47, 30)
+    _TITLE = 'File Manager'
+    _FILE_NAME_LENGTH = 10
+    _FILE_NAME_INTERVAL = 4
+    _BODY_START_Y = 3
+    _HIGHLIGHT_COLOR = (47, 30)
+    _MAIN_MENU = ['exit']
+    _STATUS_BAR_COLOR = (47, 30)
+    _STATUS_BAR_TEXT = 'Now : %s'
+    _STATUS_BAR_LEFT = 2
+    _MENU_BTN = '[M]'
+    _MENU_BTN_A_COLOR = (47, 30)
+    _MENU_BTN_B_COLOR = (40, 37)
+    _DIR_TEXT_COLOR = 35
+
+    _HORZ_MENU = {
+                  'Program' : Menu(0, 0,
+                      ['exit']),
+                  'File' : Menu(0, 0, [
+                      'Remove', 'Rename', 'Info']),
+                  'About' : Menu(0, 0, [
+                      'Help', 'About FileManager'])
+                 }
+
+    class __FileManager:
+        def __init__(self):
+            self.cur_path = os.getcwd()
+
+        def get_info(self, filename :str):
+            fp = os.path.join(self.cur_path, filename)
+            return os.stat(fp)
+        
+        def full_path(self, filename :str):
+            return os.path.join(self.cur_path, filename)
+
+        def chdir(self, dir :str):
+            self.cur_path = os.path.abspath(dir)
+
+    def __init__(self):
+        self.__mgr = self.__FileManager()
+        self.__icur = 0
+        self.__row_start = 0
+        self.__horz_menu = HorizontalMenuBar(
+                2, self._HORZ_MENU.keys(), self._HORZ_MENU.values())
+        self.__horz_menu.set_on_selected_listener(
+                self.__menu_on_selected_listener)
+
+        self.__focus = self
+        self.__temp_cwd_list = []
+
+        self.__update_file_list = []
+        self.__last_target = ()
+
+        self.__menu_btn_activated = False
+
+    @property
+    def __max_body_height(self):
+        return ln() - 1
+
+    @property
+    def __max_row_item(self):
+        return self.__max_body_height - 2
+
+    @property
+    def __max_col_item(self):
+        return int(col() / (self._FILE_NAME_LENGTH + self._FILE_NAME_INTERVAL))
+
+    @property
+    def __vis_file_list(self):
+        return self.__temp_cwd_list[self.__row_start : self.__max_col_item+self.__row_start]
+
+    def __get_item_xy(self) -> tuple:
+        '''
+        :return (x, y)
+        '''
+        y = self.__icur % self.__max_row_item
+        x = self.__icur // self.__max_row_item
+
+        # logging.info('[FMGR] get item x = %s y = %s max row = %s icur = %s'
+        #         % (x, y, self.__max_row_item, self.__icur))
+
+        return x, y
+
+    def __set_item_xy(self, x, y):
+        if x >= len(self.__temp_cwd_list) or x < 0:
+            return 
+
+        left = self.__max_row_item * x
+        self.__icur = left
+
+        if y >= len(self.__temp_cwd_list[x]) or y < 0:
+            return
+
+        self.__icur += y
+
+        logging.info('[FMGR] icur = %s' % self.__icur)
+
+    def __list_cwd(self) -> list:
+        vector_list = os.listdir(self.__mgr.cur_path)
+        vector_list.insert(0, '..')
+        matrix_list = []
+
+        while vector_list:
+            temp = list()
+            for _ in range(self.__max_row_item):
+                if vector_list:
+                    temp.append(vector_list.pop(0))
+            matrix_list.append(temp)
+
+        self.__temp_cwd_list = matrix_list
+
+        return matrix_list
+
+    def __get_mid_x(self, width) -> int:
+        return int(col() / 2 - width / 2)
+
+    def __draw_title(self):
+        puts(0, 0, bgstr(' '*col(), *self._TITLE_COLOR))
+        puts(self.__get_mid_x(len(self._TITLE)), 0, bgstr(self._TITLE,
+                                                          *self._TITLE_COLOR))
+
+    def __draw_status_bar(self):
+        puts(0, ln(), bgstr(' '*col(), *self._STATUS_BAR_COLOR))
+        bar_text = self._STATUS_BAR_TEXT % self.__mgr.cur_path
+
+        puts(self._STATUS_BAR_LEFT, ln(), 
+                bgstr(bar_text[:col() - self._STATUS_BAR_LEFT * 2]))
+
+    def __draw_menu_button(self):
+        color = self._MENU_BTN_B_COLOR if self.__menu_btn_activated else self._MENU_BTN_A_COLOR
+        puts(2, 0, bgstr(self._MENU_BTN, *color))
+
+    def __draw_files(self):
+        x, y = 0, self._BODY_START_Y
+
+        for col_ in self.__vis_file_list:
+            for cell in col_:
+                cell_text = cell[:self._FILE_NAME_LENGTH] + ' ' * self._FILE_NAME_INTERVAL
+                cell_text += ' ' * ((self._FILE_NAME_INTERVAL + self._FILE_NAME_LENGTH) - len(cell_text))
+
+                if os.path.isdir(self.__mgr.full_path(cell)):
+                    cell_text = '\033[1;%sm%s\033[0m' % (self._DIR_TEXT_COLOR, cell_text)
+
+                puts(x, y, cell_text)
+                y += 1
+
+            y = self._BODY_START_Y
+            x += self._FILE_NAME_LENGTH + self._FILE_NAME_INTERVAL
+        
+        '''
+        for cell in self.__vis_file_list[-1]:
+            cell_text = cell # + ' ' * (col()- x)
+            puts(x, y, cell_text)
+            y += 1
+        '''
+
+    def __draw_cursor(self):
+        ix, iy = self.__get_item_xy()
+        
+        x = (ix - self.__row_start) * (self._FILE_NAME_LENGTH + self._FILE_NAME_INTERVAL )
+        y = iy + self._BODY_START_Y
+        
+        try:
+            target = self.__temp_cwd_list[ix][iy]
+        except IndexError:
+            raise Exception(ix, iy, self.__icur)
+
+        tprint(x, y, bgstr(target, *self._HIGHLIGHT_COLOR))
+
+    def __menu_on_selected_listener(self, menu_name, subitem_name):
+        self.__horz_menu.set_focus(False)
+        self.__focus = self
+
+        if menu_name == 'Program':
+            if subitem_name == 'exit':
+                self.__destroy()
+        elif menu_name == 'File':
+            if subitem_name == 'Info':
+                self.__show_info()
+
+    def __main_menu_selected_listener(self, name):
+        self.__menu_btn_activated = False
+        self.__draw_menu_button()
+        if name == 'exit':
+            self.__destroy()
+
+    def __destroy(self):
+        ui_manager.destroy_ui(self)
+
+    def __mov_item_cursor(self, xinc, yinc):
+        x, y = self.__get_item_xy()
+        mtx = self.__temp_cwd_list
+
+        xo, yo = x + xinc, y + yinc 
+
+        if yo == -1:
+            xo -= 1 if len(mtx) > 1 else 0
+            yo = len(mtx[x]) - 1
+
+        elif yo >= len(mtx[x]):
+            xo += 1 if len(mtx) > 1 else 0
+            yo = 0
+
+        logging.info('[FMGR] move cursor to xo = %s yo = %s' % (xo, yo))
+
+        if xo not in range(self.__row_start, self.__max_col_item + self.__row_start):
+            if xo >= len(mtx):
+                self.__row_start = 0
+                xo = 0
+                
+            elif xo < 0:
+                self.__row_start = len(mtx) - self.__max_col_item
+                xo = self.__max_col_item + 2
+
+            elif xo < self.__row_start and self.__row_start > 0:
+                self.__row_start -= 1
+
+            elif xo + 1 > self.__row_start + self.__max_col_item :
+                self.__row_start += 1
+
+            clear()
+            logging.info('[FMGR] next page')
+
+        self.__set_item_xy(xo, yo)
+
+    def __do_key(self, key): 
+        if key == keys.KEY_ESC:
+            m = Menu(0, 2, self._MAIN_MENU)
+            m.set_on_select(self.__main_menu_selected_listener)
+            self.__menu_btn_activated = True
+            ui_manager.activate_ui(m)
+
+            return
+        elif key == keys.KEY_ENTER:
+            self.__select()
+            return
+
+        xinc, yinc = {
+                        keys.KEY_UP:    (0, -1),
+                        keys.KEY_DOWN:  (0,  1),
+                        keys.KEY_LEFT:  (-1, 0),
+                        keys.KEY_RIGHT: ( 1, 0),
+                     }.get(key, (0, 0))
+
+        self.__mov_item_cursor(xinc, yinc)
+
+    def __reset_path(self, path):
+        self.__mgr.chdir(path)
+        self.__icur = 0
+        self.__temp_cwd_list = []
+        self.__list_cwd()
+        clear()
+
+    def __select(self):
+        x, y = self.__get_item_xy()
+        target = self.__temp_cwd_list[x][y]
+        fp = self.__mgr.full_path(target)
+
+        if os.path.isdir(fp):
+            self.__reset_path(fp)
+
+    def __show_info(self):
+        x, y = self.__get_item_xy()
+        target = self.__temp_cwd_list[x][y]
+
+        st = self.__mgr.get_info(target)
+        m = st.st_mode
+
+        info_str = '\n'.join(('File name : %s\n' % target,
+         'Reg = %s\nLnk = %s\nDir = %s' % (
+                stat.S_ISREG(m), stat.S_ISLNK(m), stat.S_ISDIR(m)),
+         'Mode = %s' % stat.S_IMODE(m),
+         'Type = %s' % stat.S_IFMT(m),
+         '\nSize = %s Bytes' % st.st_size,
+        ))
+
+        infob = InfoBox(info_str, 'Info')
+        ui_manager.activate_ui(infob)
+
+    def do_key(self, key :KeyEvent):
+        k = key.key
+        
+        if k == b'\t':
+            if self.__focus is self:
+                self.__focus = self.__horz_menu
+                self.__horz_menu.set_focus(True)
+            else:
+                self.__horz_menu.set_focus(False)
+                self.__focus = self
+
+        elif self.__focus is self:
+            self.__do_key(k)
+
+        else:
+            self.__focus.do_key(key)
+    
+    def draw(self):
+        clear()
+        hide_cursor()
+        self.__list_cwd()
+        self.__draw_title()
+        self.__draw_files()
+        self.__draw_cursor()
+        self.__draw_status_bar()
+        self.__draw_menu_button()
+
+        self.__horz_menu.draw()  # child widget
+        show_cursor()
+
+        puts(0, 0, '')
+
+    def activate(self):
+        self.__list_cwd()
+        clear()
+        self.draw()
 
 if __name__ == '__main__':
     queue = KeyEventQueue()

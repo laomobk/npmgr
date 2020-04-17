@@ -2,8 +2,8 @@ import draw_tools as draw
 import traceback
 
 
-_BGCOLOR = 44
-_TEXTCOLOR = 37
+_BGCOLOR = 40
+_TEXTCOLOR = 31
 _TITLEBGCOLOR = 47
 _TITLETEXTCOLOR = 30
 
@@ -35,6 +35,6 @@ def handle_exception(exc_type, exc_value, exc_tb, kidding=False):
     draw.tprint(0, 0, draw.bgstr(' '*draw.col(), _TITLEBGCOLOR, _TITLETEXTCOLOR))
     draw.tprint(int(draw.col() / 2 - len(_ERR_TITLE) / 2), 0, 
                 draw.bgstr(_ERR_TITLE, _TITLEBGCOLOR, _TITLETEXTCOLOR))
-
-    input(draw.bgstr('\n[Enter to exit]', _BGCOLOR, _TEXTCOLOR))
+    
+    input(draw.bgstr('\n [Enter to exit]', _BGCOLOR, _TEXTCOLOR))
     draw.clear()

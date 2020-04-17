@@ -2,7 +2,7 @@ import threading
 
 import logging
 from key_reader import KeyReader
-from event import KeyEventQueue
+from event import KeyEventQueue, KeyEvent
 from ui import UI
 import exceptions
 from err_screen import handle_exception
@@ -88,6 +88,9 @@ class _UIManager:
         except Exception:
             handle_exception(*sys.exc_info())
 
+    def get_key(self) -> KeyEvent:
+        return self.__kreader.get_key()
+
     def exit(self, exit_code=0):
         clear()
         sys.exit(exit_code)
@@ -116,7 +119,9 @@ def refresh_screen():
     GLOBAL_BOX_MANAGER.draw_all_ui()
 
 
+def get_key() -> KeyEvent:
+    return GLOBAL_BOX_MANAGER.get_key()
+
+
 def npmgr_exit(exit_code=0):
     GLOBAL_BOX_MANAGER.exit(exit_code)
-
-

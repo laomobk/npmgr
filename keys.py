@@ -2,6 +2,8 @@
 
 KEY_UP = b'\033[A'
 KEY_DOWN = b'\033[B'
+KEY_LEFT = b'\033[D'
+KEY_RIGHT = b'\033[C'
 KEY_ENTER = b'\n'
 KEY_RETURN = b'\r'
 KEY_EOF = b'\x04'
