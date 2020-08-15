@@ -1,0 +1,6 @@
+2020-07-15 00:18:15,060 - /data/data/com.termux/files/home/npmgr/ui_collections.py[line:39] - INFO: [LOG] setup logger
+2020-07-15 00:18:15,061 - /data/data/com.termux/files/home/npmgr/program_manager.py[line:52] - INFO: [PLOADER] Load path = /data/data/com.termux/files/usr/bin
+2020-07-15 00:18:25,835 - /data/data/com.termux/files/home/npmgr/ui_collections.py[line:769] - INFO: [SEL] Selected = egrep
+2020-07-15 00:18:26,740 - /data/data/com.termux/files/home/npmgr/ui_collections.py[line:786] - INFO: [SEL] Finish
+2020-07-15 00:20:56,588 - /data/data/com.termux/files/home/npmgr/ui_collections.py[line:769] - INFO: [SEL] Selected = clang-rename
+2020-07-15 00:21:03,114 - /data/data/com.termux/files/home/npmgr/ui_collections.py[line:786] - INFO: [SEL] Finish
